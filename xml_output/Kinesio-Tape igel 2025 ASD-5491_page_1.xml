@@ -1,0 +1,140 @@
+Here is the converted XML, structured as per the details provided in your Markdown table. The XML ensures all fields, labels, and empty values are represented accurately, maintaining the integrity of the provided form schema:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<Form>
+    <Metadata>
+        <FormTitle>Honorarvereinbarung Eventrekorder</FormTitle>
+        <OrganizationalContext></OrganizationalContext>
+        <FormPurpose>Honorarium agreement for event recorder</FormPurpose>
+        <MandatoryFields>Marked with an asterisk (*)</MandatoryFields>
+    </Metadata>
+    <Sections>
+        <Section name="First visible section (top area)">
+            <Field>
+                <Label>Vorname, Name*</Label>
+                <Value></Value>
+            </Field>
+            <Field>
+                <Label>Straße, Hausnummer*</Label>
+                <Value></Value>
+            </Field>
+            <Field>
+                <Label>Postleitzahl, Ort*</Label>
+                <Value></Value>
+            </Field>
+            <Field>
+                <Label>Telefonnummer, E-Mail*</Label>
+                <Value></Value>
+            </Field>
+        </Section>
+        <Section name="Rechnungsempfänger* (sofern abweichend)">
+            <Field>
+                <Label>Vorname, Name / Firma</Label>
+                <Value></Value>
+            </Field>
+            <Field>
+                <Label>Straße, Hausnummer</Label>
+                <Value></Value>
+            </Field>
+            <Field>
+                <Label>Postleitzahl, Ort</Label>
+                <Value></Value>
+            </Field>
+        </Section>
+        <Section name="Rechnungsanschrift (nur bei Abweichung)">
+            <Note>(fields are above—see Rechnungsempfänger)</Note>
+        </Section>
+        <Section name="Bankverbindung">
+            <Field>
+                <Label>Kontoinhaber/in*</Label>
+                <Value></Value>
+            </Field>
+            <Field>
+                <Label>Kreditinstitut*</Label>
+                <Value></Value>
+            </Field>
+            <Field>
+                <Label>IBAN*</Label>
+                <Value></Value>
+            </Field>
+            <Field>
+                <Label>BIC (nur bei ausländischen Konten)*</Label>
+                <Value></Value>
+            </Field>
+        </Section>
+        <Section name="Honorar">
+            <Field>
+                <Label>Gesamthonorar Eventrekorder*</Label>
+                <Value></Value>
+            </Field>
+            <Field>
+                <Label>Fahrtkostenerstattung (Anzahl km: _______ à 0,30 €)*</Label>
+                <Value></Value>
+            </Field>
+            <Field>
+                <Label>Park-/ÖPNV-/sonstige Auslagen (Nachweis beifügen)</Label>
+                <Value></Value>
+            </Field>
+        </Section>
+        <Section name="Ggf. Sonstiges">
+            <Field>
+                <Label>Sonstiges</Label>
+                <Value></Value>
+            </Field>
+        </Section>
+        <Section name="Gesamtsumme">
+            <Field>
+                <Label>Gesamtsumme</Label>
+                <Value></Value>
+            </Field>
+        </Section>
+        <Section name="Ort, Datum">
+            <Field>
+                <Label>Ort, Datum</Label>
+                <Value></Value>
+            </Field>
+        </Section>
+        <Section name="Unterschrift des Abrechnungsberechtigten">
+            <Field>
+                <Label>(Freifeld für Unterschrift)</Label>
+                <Value></Value>
+            </Field>
+        </Section>
+        <Section name="Bearbeitungsvermerke (interne Verwendung)">
+            <Field>
+                <Label>Buchungsnummer</Label>
+                <Value></Value>
+            </Field>
+            <Field>
+                <Label>Haushaltsstelle</Label>
+                <Value></Value>
+            </Field>
+            <Field>
+                <Label>Rechnungsnummer</Label>
+                <Value></Value>
+            </Field>
+            <Field>
+                <Label>Rechnungsprüfung</Label>
+                <Value></Value>
+            </Field>
+            <Field>
+                <Label>Auszahlung am</Label>
+                <Value></Value>
+            </Field>
+        </Section>
+    </Sections>
+    <Footer>
+        <Note>Pflichtfelder mit * gekennzeichnet</Note>
+    </Footer>
+</Form>
+```
+
+### Key Points:
+1. **Empty Fields:** All fields without values are represented as `<Value></Value>`.
+2. **Section Names:** Each section is named distinctly based on the table.
+3. **Metadata:** Captured as a separate `<Metadata>` section.
+4. **Consistency:** All labels and fields match the original table layout.
+5. **Well-formed XML:** Valid and structured to maintain hierarchy. 
+
+Let me know if you need modifications or extensions!

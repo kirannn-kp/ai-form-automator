@@ -1,0 +1,54 @@
+```xml
+<AusfallhonorarForm>
+    <Metadata>
+        <DocumentType>Ausfallhonorar Form</DocumentType>
+        <Language>German (de)</Language>
+        <Structure>Single-page form</Structure>
+        <ImageQuality>Good (legible)</ImageQuality>
+    </Metadata>
+    <Header>
+        <Title>Ausfallhonorar</Title>
+        <Subheading/>
+    </Header>
+    <TopFormMetadata>
+        <PatientName/>
+        <Birthdate/>
+        <Address/>
+        <ContactInformation>
+            <Phone/>
+            <Email/>
+        </ContactInformation>
+        <Appointment>
+            <Date/>
+            <Time/>
+            <OrderedService/>
+        </Appointment>
+    </TopFormMetadata>
+    <MidFormInformation>
+        <Greeting>Sehr geehrter Patient,</Greeting>
+        <Message>
+            Sie haben den oben genannten Behandlungstermin in unserer Praxis 
+            am: _____________________ Uhrzeit: _____________________
+            nicht rechtzeitig abgesagt (mind. 24h vorher) oder unentschuldigt nicht wahrgenommen.
+            Bitte haben Sie Verständnis, dass wir Ihnen für den ausgefallenen Termin gemäß § 615 BGB 
+            ein Ausfallhonorar in Rechnung stellen.
+        </Message>
+        <Fee>
+            <Amount>_____________________ €</Amount>
+        </Fee>
+    </MidFormInformation>
+    <AdditionalInformation>
+        <Note>Falls Sie eine Fragen haben, wenden Sie sich bitte an unser Praxisteam.</Note>
+        <BankDetails>
+            <IBAN>____________________________________________</IBAN>
+            <BIC>____________________________________________</BIC>
+            <TransferPurpose>Ausfallhonorar, Name, Datum</TransferPurpose>
+        </BankDetails>
+    </AdditionalInformation>
+    <SignatureBlock>
+        <LocationAndDate>________________________________________</LocationAndDate>
+        <Signature>________________________________________</Signature>
+        <PracticeStamp>________________________________________</PracticeStamp>
+    </SignatureBlock>
+</AusfallhonorarForm>
+```
