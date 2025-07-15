@@ -1,24 +1,35 @@
+"""
+Clean PDF Processing Script
+
+This script processes JSON files (extracted from PDFs) and converts them to XML format
+using Azure OpenAI GPT-4.
+
+Usage: python process_pdfs.py
+"""
+
 import os
-import fitz  # PyMuPDF
 import requests
 import json
-from PIL import Image
-import base64
 from dotenv import load_dotenv
-from dataclasses import dataclass
 from typing import Callable, Any, Optional
 import time
 from pathlib import Path
 import xml.etree.ElementTree as ET
 
-# Explicitly load the .env file using its absolute path
+# Load environment variables
 dotenv_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '.env'))
 load_dotenv(dotenv_path=dotenv_path)
 
-print(f"GPT41_KEY: {os.getenv('GPT41_KEY')}")
-print(f"GPT4O_KEY: {os.getenv('GPT4O_KEY')}")
+# Verify environment variables are loaded (without exposing values)
+if os.getenv('GPT41_KEY'):
+    print("✅ GPT41_KEY loaded successfully")
+if os.getenv('GPT4O_KEY'):
+    print("✅ GPT4O_KEY loaded successfully")
 
 class AzureContentUnderstandingClient:
+    """
+    Azure Content Understanding Client for document analysis
+    """
     def __init__(
         self,
         endpoint: str,
@@ -41,6 +52,84 @@ class AzureContentUnderstandingClient:
         self._headers: dict[str, str] = self._get_headers(
             subscription_key, token_provider and token_provider(), x_ms_useragent
         )
+
+    def begin_analyze(self, analyzer_id: str, file_location: str):
+        """Begin document analysis"""
+        if Path(file_location).exists():
+            with open(file_location, "rb") as file:
+                data = file.read()
+            headers = {"Content-Type": "application/octet-stream"}
+        elif "https://" in file_location or "http://" in file_location:
+            data = {"url": file_location}
+            headers = {"Content-Type": "application/json"}
+        else:
+            raise ValueError("File location must be a valid path or URL.")
+
+        headers.update(self._headers)
+        if isinstance(data, dict):
+            response = requests.post(
+                url=self._get_analyze_url(
+                    self._endpoint, self._api_version, analyzer_id
+                ),
+                headers=headers,
+                json=data,
+            )
+        else:
+            response = requests.post(
+                url=self._get_analyze_url(
+                    self._endpoint, self._api_version, analyzer_id
+                ),
+                headers=headers,
+                data=data,
+            )
+
+        response.raise_for_status()
+        return response
+
+    def poll_result(
+        self,
+        response: requests.Response,
+        timeout_seconds: int = 120,
+        polling_interval_seconds: int = 2,
+    ) -> dict[str, Any]:
+        """Poll for analysis results"""
+        operation_location = response.headers.get("operation-location", "")
+        if not operation_location:
+            raise ValueError("Operation location not found in response headers.")
+
+        start_time = time.time()
+        while True:
+            elapsed_time = time.time() - start_time
+            if elapsed_time > timeout_seconds:
+                raise TimeoutError(
+                    f"Operation timed out after {timeout_seconds:.2f} seconds."
+                )
+
+            response = requests.get(operation_location, headers=self._headers)
+            response.raise_for_status()
+            result = response.json()
+            status = result.get("status", "").lower()
+            if status == "succeeded":
+                return result
+            elif status == "failed":
+                raise RuntimeError("Request failed.")
+            time.sleep(polling_interval_seconds)
+
+    def _get_analyze_url(self, endpoint: str, api_version: str, analyzer_id: str):
+        """Get analysis URL"""
+        return f"{endpoint}/contentunderstanding/analyzers/{analyzer_id}:analyze?api-version={api_version}&stringEncoding=utf16"
+
+    def _get_headers(
+        self, subscription_key: Optional[str], api_token: Optional[str], x_ms_useragent: str
+    ) -> dict[str, str]:
+        """Get request headers"""
+        headers = (
+            {"Ocp-Apim-Subscription-Key": subscription_key}
+            if subscription_key
+            else {"Authorization": f"Bearer {api_token}"}
+        )
+        headers["x-ms-useragent"] = x_ms_useragent
+        return headers
 
     def begin_analyze(self, analyzer_id: str, file_location: str):
         if Path(file_location).exists():
@@ -246,7 +335,14 @@ def convert_json_to_xml(json_data, gpt4o_url, gpt4o_key):
 
 def convert_json_to_xml_v2(json_data, gpt4o_url, gpt4o_key):
     """
-    Sends JSON data to GPT-4o for conversion to XML format.
+    Converts JSON data to XML format using GPT-4o
+      Args:
+        json_data: The JSON data to convert
+        gpt4o_url: Azure OpenAI GPT-4o endpoint URL
+        gpt4o_key: Azure OpenAI API key
+        
+    Returns:
+        XML content as string
     """
     headers = {
         'api-key': gpt4o_key,
@@ -258,37 +354,71 @@ def convert_json_to_xml_v2(json_data, gpt4o_url, gpt4o_key):
             {
                 "role": "system",
                 "content": (
-                    "You are an AI that converts JSON data into structured XML matching a predefined schema. "
-                    "The schema should match the following structure: \n"
-                    "<root>\n"
-                    "  <general app_version='3.1' lng='de' name='Honorarvereinbarung Kinesiotapetherapie' special_type='' type='patient' uuid='D2D50516-A10E-44A4-AE58-383D4A026092' version='1.0'/>\n"
-                    "  <rules/>\n"
-                    "  <form export_positives_only='true' name='' pageNumbers='true' pageNumbersHidden='false' pageNumbersPos='bottom_center' pageNumbersType='text' pdf_drawing='false' pdf_only='true' ref='9A37547F-B21F-41EE-9811-91CB22C34E89' subtitle='' title='Honorarvereinbarung Kinesiotapetherapie' type='patient'>\n"
-                    "    <signatures>\n"
-                    "      <signature date='true' location='true' ref='41F94F08-AD4A-48F8-8F8A-4EE8129CFAE6' title='Unterschrift der Patientin / des Patienten' type='patient'/>\n"
-                    "    </signatures>\n"
-                    "    <page ref='40B08450-1423-47DC-BB02-1ED1C782C771' title='Honorarvereinbarung'>\n"
-                    "      <label align='left' bottom_space='2' font='subheader' name='Text' ref='B686AFA1-4B8D-4A3C-8F7C-9FE70761A079' title='§{pat_complete}§' top_space='30'/>\n"
-                    "      <!-- Additional labels omitted for brevity -->\n"
-                    "    </page>\n"
-                    "  </form>\n"
-                    "  <localisation/>\n"
-                    "</root>\n"
-                    "Ensure the XML output replicates this structure accurately, including all attributes and nested elements. "
-                    "Validate the XML to ensure it is well-formed and matches the expected structure."
+                    "You are an expert medical forms data converter. Your job is to convert structured JSON data (from a medical form) into a well-formed XML document that matches the original form's structure and content as closely as possible.\n"
+                    "- The XML must have a <root> element, and all relevant metadata, fields, and content from the JSON must be mapped to appropriate XML elements and attributes.\n"
+                    "- For each patient field (such as name, date of birth, address, etc.), create a <label> element with a 'title' attribute containing the value or a placeholder (e.g., §{pat_complete}§, §{pat_dob}§, etc.).\n"
+                    "- Include all static text, instructions, and legal/consent language from the form as <label> elements, preserving their order and formatting.\n"
+                    "- Use the correct form name, title, and section headers as found in the JSON or inferred from the content.\n"
+                    "- If the JSON contains page, table, or key-value data, map these to XML in a way that preserves the original form's structure.\n"
+                    "- Do NOT include any markdown, explanations, or comments—output ONLY the XML.\n"
+                    "- The XML must be valid and ready for use in a medical forms system.\n"
+                    "- If a field is missing, use a placeholder in the format §{field_name}§.\n"
                 )
             },
             {
                 "role": "user",
-                "content": f"Please convert the following JSON data into XML with the expected structure:\n{json.dumps(json_data, indent=4)}"
+                "content": f"Convert this JSON data to the complete XML structure for a diving sports examination form:\n{json.dumps(json_data, indent=2)}"
             }
         ]
     }
 
     response = requests.post(gpt4o_url, headers=headers, json=data)
     response.raise_for_status()
-    print("Successfully converted JSON to XML.")
-    return response.json()["choices"][0]["message"]["content"]
+    print("Successfully converted JSON to XML.")    # Extract XML content from response
+    xml_content = response.json()["choices"][0]["message"]["content"]
+    
+    # Clean up the response - remove any markdown formatting or extra text
+    if "````xml" in xml_content:
+        xml_content = xml_content.split("````xml")[1].split("````")[0].strip()
+    elif "```xml" in xml_content:
+        xml_content = xml_content.split("```xml")[1].split("```")[0].strip()
+    elif "```" in xml_content:
+        xml_content = xml_content.split("```")[1].split("```")[0].strip()
+    
+    # Remove any remaining markdown backticks
+    xml_content = xml_content.replace("````", "").replace("```", "")
+    
+    # Remove any leading/trailing text before <?xml or <root>
+    if "<?xml" in xml_content:
+        xml_content = xml_content[xml_content.find("<?xml"):]
+    elif "<root>" in xml_content:
+        xml_content = xml_content[xml_content.find("<root>"):]
+    
+    # Remove any text after </root>
+    if "</root>" in xml_content:
+        xml_content = xml_content[:xml_content.find("</root>") + 7]
+    
+    # Remove any explanatory text or comments that GPT might have added
+    lines = xml_content.split('\n')
+    clean_lines = []
+    in_comment_block = False
+    
+    for line in lines:
+        # Skip lines that look like explanations or markdown
+        if line.strip().startswith('###') or line.strip().startswith('**') or line.strip().startswith('- '):
+            continue
+        if 'Explanation:' in line or 'explanation:' in line:
+            in_comment_block = True
+            continue
+        if in_comment_block and not line.strip().startswith('<'):
+            continue
+        if line.strip().startswith('<') or line.strip() == '':
+            in_comment_block = False
+            clean_lines.append(line)
+    
+    xml_content = '\n'.join(clean_lines).strip()
+    
+    return xml_content
 
 def send_pdf_to_content_understanding_v2(pdf_path, analyzer_id, client):
     """
@@ -392,70 +522,175 @@ def process_json_to_xml_workflow(json_folder, xml_output_folder, gpt4o_url, gpt4
 
 def preprocess_json_data(json_data):
     """
-    Preprocesses JSON data to ensure it contains all required fields for XML generation.
+    Preprocesses JSON data and extracts all possible fields for XML conversion.
+    Extracts patient info, all key-value pairs, all lines, and all table cells as fields.
     """
+    import re
+    
     # Ensure 'fields' key exists
     if 'fields' not in json_data:
         json_data['fields'] = {}
 
-    # Add missing fields with default or inferred values
-    json_data['fields']['pat_complete'] = json_data['fields'].get('pat_complete', 'John Doe')
-    json_data['fields']['pat_dob'] = json_data['fields'].get('pat_dob', '01.01.1980')
-    json_data['fields']['pat_street'] = json_data['fields'].get('pat_street', '123 Main Street')
-    json_data['fields']['pat_postalcode'] = json_data['fields'].get('pat_postalcode', '12345')
-    json_data['fields']['pat_city'] = json_data['fields'].get('pat_city', 'Sample City')
+    # Extract all key-value pairs
+    for k, v in json_data.get('key_value_pairs', {}).items():
+        field_name = k.strip().replace(':', '').replace(' ', '_').lower()
+        json_data['fields'][field_name] = {'content': v.strip()}
 
-    # Ensure markdown content is properly formatted
-    if 'markdown' in json_data:
-        json_data['markdown'] = json_data['markdown'].replace('\u00c4', 'Ä').replace('\u00fc', 'ü').replace('\u00f6', 'ö')
+    # Extract all lines from all pages
+    for page in json_data.get('pages', []):
+        for idx, line in enumerate(page.get('lines', [])):
+            field_name = f'page{page.get("page_number", 1)}_line{idx+1}'
+            json_data['fields'][field_name] = {'content': line.strip()}
 
+    # Extract all table cells
+    for table in json_data.get('tables', []):
+        for idx, cell in enumerate(table.get('cells', [])):
+            field_name = f'tablecell_{idx+1}'
+            json_data['fields'][field_name] = {'content': cell.get('content', '').strip()}
+
+    # (Optional) Still try to extract patient info with regex for backward compatibility
+    all_content = ''
+    if 'content' in json_data:
+        all_content += json_data['content'] + ' '
+    for page in json_data.get('pages', []):
+        if 'lines' in page:
+            all_content += ' '.join(page['lines']) + ' '
+    for table in json_data.get('tables', []):
+        if 'cells' in table:
+            for cell in table['cells']:
+                if 'content' in cell:
+                    all_content += cell['content'] + ' '
+    # ...existing code for regex extraction if needed...
     return json_data
+
+def convert_json_to_xml_dynamic(json_data):
+    """
+    Dynamically generates XML from JSON data, including all fields as <label> elements.
+    """
+    import xml.etree.ElementTree as ET
+    from xml.dom import minidom
+
+    root = ET.Element('root')
+    general = ET.SubElement(root, 'general', {
+        'app_version': '3.1',
+        'lng': 'de',
+        'name': json_data.get('form_name', 'Generic Medical Form'),
+        'special_type': '',
+        'type': 'patient',
+        'uuid': json_data.get('uuid', 'GENERIC-UUID'),
+        'version': '1.0'
+    })
+    ET.SubElement(root, 'rules')
+    form = ET.SubElement(root, 'form', {
+        'export_positives_only': 'true',
+        'name': '',
+        'pageNumbers': 'true',
+        'pageNumbersHidden': 'false',
+        'pageNumbersPos': 'bottom_center',
+        'pageNumbersType': 'text',
+        'pdf_drawing': 'false',
+        'pdf_only': 'true',
+        'ref': json_data.get('form_ref', 'GENERIC-FORM-REF'),
+        'subtitle': '',
+        'title': json_data.get('form_title', json_data.get('form_name', 'Generic Medical Form')),
+        'type': 'patient'
+    })
+    signatures = ET.SubElement(form, 'signatures')
+    ET.SubElement(signatures, 'signature', {
+        'date': 'true',
+        'location': 'true',
+        'ref': 'GENERIC-SIGNATURE-REF',
+        'title': 'Unterschrift der Patientin / des Patienten',
+        'type': 'patient'
+    })
+    page = ET.SubElement(form, 'page', {
+        'ref': 'GENERIC-PAGE-REF',
+        'title': json_data.get('form_title', json_data.get('form_name', 'Generic Medical Form'))
+    })
+    # Add all fields as <label> elements
+    for field, value in json_data.get('fields', {}).items():
+        label = ET.SubElement(page, 'label', {
+            'name': field,
+            'title': f"§{value.get('content', '')}§"
+        })
+    ET.SubElement(root, 'localisation')
+    # Pretty print
+    xml_str = ET.tostring(root, encoding='utf-8')
+    parsed = minidom.parseString(xml_str)
+    return parsed.toprettyxml(indent='  ', encoding='utf-8').decode('utf-8')
 
 def main():
     # Initialize the Azure Content Understanding Client
-    endpoint = "https://ai-t-kpanchal-5150.services.ai.azure.com/"
+    endpoint = os.getenv('AZURE_CONTENT_UNDERSTANDING_ENDPOINT', 'https://ai-t-kpanchal-5150.services.ai.azure.com/')
     api_version = "2025-05-01-preview"
-    subscription_key = "7VlgDMG3kaHBNAZfSHOgBZEAMKs9KbDrYPNW7pDBOV9xw0lnHbC0JQQJ99BFACfhMk5XJ3w3AAAAACOG0mzh"
+    subscription_key = os.getenv('AZURE_CONTENT_UNDERSTANDING_KEY')
+    
+    if not subscription_key:
+        raise ValueError("AZURE_CONTENT_UNDERSTANDING_KEY is not defined. Please check your .env file.")
 
     client = AzureContentUnderstandingClient(
         endpoint=endpoint,
         api_version=api_version,
         subscription_key=subscription_key
-    )
-
-    # Define input and output folders for JSON and XML
+    )    # Define input and output folders for JSON and XML
     json_folder = "json_output/"
     xml_output_folder = "xml_output/"
 
+    # Ensure directories exist
+    os.makedirs(json_folder, exist_ok=True)
+    os.makedirs(xml_output_folder, exist_ok=True)
+
     # GPT-4o API details
-    gpt4o_url = "https://AIAgent-openai02.openai.azure.com/openai/deployments/gpt-4o/chat/completions?api-version=2025-01-01-preview"
+    gpt4o_url = os.getenv('GPT4O_URL')
     gpt4o_key = os.getenv('GPT4O_KEY')
 
-    # Ensure GPT-4o key is loaded from the .env file
+    # Ensure GPT-4o URL and key are loaded from the .env file
+    if not gpt4o_url:
+        raise ValueError("GPT-4o URL is not defined. Please check your .env file (GPT4O_URL).")
     if not gpt4o_key:
-        raise ValueError("GPT-4o key is not defined. Please check your .env file.")
+        raise ValueError("GPT-4o key is not defined. Please check your .env file (GPT4O_KEY).")
+
+    print("Starting PDF processing workflow...")
+    
+    # Get list of JSON files
+    json_files = [f for f in os.listdir(json_folder) if f.endswith('.json')]
+    if not json_files:
+        print("No JSON files found in the json_output folder.")
+        return
+    
+    print(f"Found {len(json_files)} JSON file(s) to process:")
+    for json_file in json_files:
+        print(f"  - {json_file}")
+    print()
 
     # Process JSON files
-    for json_file in os.listdir(json_folder):
-        if json_file.endswith('.json'):
-            json_path = os.path.join(json_folder, json_file)
+    for json_file in json_files:
+        print(f"Processing: {json_file}")
+        json_path = os.path.join(json_folder, json_file)
 
-            # Load JSON data
-            with open(json_path, 'r') as file:
+        try:            # Load JSON data
+            with open(json_path, 'r', encoding='utf-8') as file:
                 json_data = json.load(file)
 
             # Preprocess JSON data
             json_data = preprocess_json_data(json_data)
 
-            # Convert JSON to XML
-            xml_data = convert_json_to_xml_v2(json_data, gpt4o_url, gpt4o_key)
+            # Convert JSON to XML using dynamic approach
+            xml_data = convert_json_to_xml_dynamic(json_data)
 
             # Save XML output
             xml_filename = f"{os.path.splitext(json_file)[0]}.xml"
             xml_path = os.path.join(xml_output_folder, xml_filename)
             with open(xml_path, 'w', encoding='utf-8') as xml_file:
                 xml_file.write(xml_data)
-            print(f"Saved XML: {xml_path}")
+            print(f"✅ Successfully saved XML: {xml_path}")
+            
+        except Exception as e:
+            print(f"❌ Error processing {json_file}: {str(e)}")
+            continue
+
+    print(f"\n🎉 Processing complete! Check the '{xml_output_folder}' folder for XML outputs.")
 
 if __name__ == "__main__":
     main()
+
