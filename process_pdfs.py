@@ -1,281 +1,407 @@
 import os
-import fitz  # PyMuPDF
-import requests
 import json
-from PIL import Image
-import base64
-from dotenv import load_dotenv
+import logging
+from dataclasses import dataclass
+from typing import List, Optional, Dict, Any
 
-# Explicitly load the .env file using its absolute path
-dotenv_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '.env'))
-load_dotenv(dotenv_path=dotenv_path)
+# Load environment variables from .env file
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    # dotenv is optional, env vars can be set in system
+    pass
 
-print(f"GPT41_KEY: {os.getenv('GPT41_KEY')}")
-print(f"GPT4O_KEY: {os.getenv('GPT4O_KEY')}")
+# Azure SDK imports
+from azure.identity import DefaultAzureCredential
+from azure.storage.blob import BlobServiceClient
+from azure.ai.documentintelligence import DocumentIntelligenceClient
+from openai import AzureOpenAI
 
-def convert_pdf_to_images(pdf_folder, output_folder):
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+@dataclass
+class PriceValidationResult:
+    """Data class for price validation results"""
+    found_prices: List[Dict[str, Any]]
+    inconsistencies: List[str]
+    confidence_score: float
+    validation_details: str
+
+@dataclass
+class DocumentProcessingResult:
+    """Data class for complete document processing results"""
+    document_name: str
+    text_content: str
+    price_validation: PriceValidationResult
+    processing_status: bool
+    error_message: Optional[str] = None
+
+def validate_prices_with_gpt41(text_content: str, openai_client: AzureOpenAI) -> PriceValidationResult:
+    """
+    Validate price consistency using GPT-4.1 directly (no agents required)
+    """
+    try:
+        validation_prompt = f"""
+        You are a specialized price validation expert. Analyze the following document for price consistency issues.
+
+        Tasks:
+        1. Extract all numerical prices (e.g., $100.50, €25.99, 1,234.56 USD)
+        2. Extract all written-out prices (e.g., "one hundred dollars", "twenty-five euros")
+        3. Identify any discrepancies between numerical and textual price representations
+        4. Check for currency inconsistencies
+        5. Validate mathematical calculations involving prices
+
+        Return your analysis in valid JSON format:
+        {{
+            "found_prices": [
+                {{
+                    "type": "numerical",
+                    "value": 100.50,
+                    "currency": "USD",
+                    "location": "paragraph 1",
+                    "original_text": "$100.50"
+                }},
+                {{
+                    "type": "written",
+                    "value": 100.50,
+                    "currency": "USD", 
+                    "location": "paragraph 1",
+                    "original_text": "one hundred dollars and fifty cents"
+                }}
+            ],
+            "inconsistencies": [
+                "Price mismatch: $100.50 vs 'ninety dollars' in section 2"
+            ],
+            "confidence_score": 0.95,
+            "validation_summary": "Found 2 price references, 1 inconsistency detected"
+        }}
+
+        Document content to analyze:
+        {text_content[:3000]}...
+        """
+
+        response = openai_client.chat.completions.create(
+            model="gpt-4.1",  # Your deployment name
+            messages=[
+                {
+                    "role": "system", 
+                    "content": "You are a precise financial document analyst. Always respond with valid JSON only."
+                },
+                {
+                    "role": "user", 
+                    "content": validation_prompt
+                }
+            ],
+            temperature=0.1,
+            max_tokens=2000
+        )
+
+        response_content = response.choices[0].message.content
+        logger.info(f"GPT-4.1 response received: {len(response_content)} characters")
+
+        try:
+            # Parse JSON response
+            result_data = json.loads(response_content)
+            
+            return PriceValidationResult(
+                found_prices=result_data.get("found_prices", []),
+                inconsistencies=result_data.get("inconsistencies", []),
+                confidence_score=result_data.get("confidence_score", 0.0),
+                validation_details=result_data.get("validation_summary", "Analysis completed")
+            )
+            
+        except json.JSONDecodeError as e:
+            logger.warning(f"Failed to parse JSON response: {e}")
+            # Return a structured response even if JSON parsing fails
+            return PriceValidationResult(
+                found_prices=[],
+                inconsistencies=[],
+                confidence_score=0.7,
+                validation_details=f"Raw GPT response: {response_content[:200]}..."
+            )
+        
+    except Exception as e:
+        logger.error(f"GPT-4.1 validation error: {str(e)}")
+        return PriceValidationResult(
+            found_prices=[],
+            inconsistencies=[f"GPT validation failed: {str(e)}"],
+            confidence_score=0.0,
+            validation_details=f"Error occurred: {str(e)}"
+        )
+
+def get_blob_files(blob_service_client: BlobServiceClient, container_name: str) -> List[str]:
+    """Get list of PDF files from blob storage"""
+    try:
+        container_client = blob_service_client.get_container_client(container_name)
+        pdf_files = [blob.name for blob in container_client.list_blobs() if blob.name.endswith('.pdf')]
+        logger.info(f"Found {len(pdf_files)} PDF files in container '{container_name}'")
+        return pdf_files
+    except Exception as e:
+        logger.error(f"Failed to list blob files: {str(e)}")
+        return []
+
+def extract_text_from_pdf(doc_intel_client: DocumentIntelligenceClient, blob_service_client: BlobServiceClient, 
+                         container_name: str, pdf_file: str) -> str:
+    """Extract text from PDF using Document Intelligence"""
+    try:
+        # Get blob content
+        blob_client = blob_service_client.get_blob_client(container=container_name, blob=pdf_file)
+        blob_data = blob_client.download_blob().readall()
+        
+        # Analyze with Document Intelligence
+        poller = doc_intel_client.begin_analyze_document(
+            model_id="prebuilt-read",
+            body=blob_data,
+            content_type="application/pdf"
+        )
+        
+        result = poller.result()
+        text_content = result.content if result.content else ""
+        
+        logger.info(f"Extracted {len(text_content)} characters from {pdf_file}")
+        return text_content
+        
+    except Exception as e:
+        logger.error(f"Failed to extract text from {pdf_file}: {str(e)}")
+        return ""
+
+def save_processing_results(results: List[DocumentProcessingResult], output_folder: str):
+    """Save processing results to JSON files"""
     if not os.path.exists(output_folder):
         os.makedirs(output_folder)
-
-    for pdf_file in os.listdir(pdf_folder):
-        if pdf_file.endswith('.pdf'):
-            pdf_path = os.path.join(pdf_folder, pdf_file)
-            pdf_document = fitz.open(pdf_path)
-
-            for page_number in range(len(pdf_document)):
-                page = pdf_document[page_number]
-                pix = page.get_pixmap()
-                image_filename = f"{os.path.splitext(pdf_file)[0]}_page_{page_number + 1}.jpeg"
-                image_path = os.path.join(output_folder, image_filename)
-                pix.save(image_path)
-                print(f"Saved image: {image_path}")
-
-def send_image_to_gpt41(image_path, gpt41_url, gpt41_key):
-    # Encode the image in Base64
-    with open(image_path, "rb") as image_file:
-        base64_image = base64.b64encode(image_file.read()).decode("utf-8")
-
-    headers = {
-        'api-key': gpt41_key,
-        'Content-Type': 'application/json'
-    }
-    data = {
-        "messages": [
-            {
-                "role": "user",
-                "content": (
-                    "Please extract all relevant text and metadata from this image and structure it into a detailed Markdown table. "
-                    "Ensure the table includes all fields, labels, and their associated values as they appear in the form. "
-                    "Focus on accurately capturing the structure and content of the form titled 'Honorarvereinbarung Eventrekorder'. "
-                    "Avoid placeholder or fabricated data and ensure all extracted content matches the original form. "
-                    "If a field is empty in the form, represent it as an empty tag in the XML."
-                )
-            },
-            {
-                "role": "user",
-                "content": f"data:image/jpeg;base64,{base64_image}"
+    
+    # Save individual results
+    for result in results:
+        if result.processing_status:
+            filename = f"{result.document_name}_price_validation.json"
+            filepath = os.path.join(output_folder, filename)
+            
+            # Convert to serializable format
+            result_dict = {
+                "document_name": result.document_name,
+                "processing_status": result.processing_status,
+                "price_validation": {
+                    "found_prices": result.price_validation.found_prices,
+                    "inconsistencies": result.price_validation.inconsistencies,
+                    "confidence_score": result.price_validation.confidence_score,
+                    "validation_details": result.price_validation.validation_details
+                },
+                "text_length": len(result.text_content),
+                "error_message": result.error_message
             }
+            
+            with open(filepath, 'w', encoding='utf-8') as f:
+                json.dump(result_dict, f, indent=2, ensure_ascii=False)
+            
+            logger.info(f"Saved results: {filepath}")
+
+def create_summary_report(results: List[DocumentProcessingResult], output_folder: str):
+    """Create overall summary report"""
+    if not results:
+        return
+    
+    successful_results = [r for r in results if r.processing_status]
+    failed_results = [r for r in results if not r.processing_status]
+    
+    total_prices = sum(len(r.price_validation.found_prices) for r in successful_results)
+    total_inconsistencies = sum(len(r.price_validation.inconsistencies) for r in successful_results)
+    
+    summary = {
+        "processing_summary": {
+            "total_documents": len(results),
+            "successful_documents": len(successful_results),
+            "failed_documents": len(failed_results),
+            "total_prices_found": total_prices,
+            "total_inconsistencies": total_inconsistencies,
+            "average_confidence": sum(r.price_validation.confidence_score for r in successful_results) / len(successful_results) if successful_results else 0
+        },
+        "document_details": [
+            {
+                "document": r.document_name,
+                "status": "✅ SUCCESS" if r.processing_status else "❌ FAILED",
+                "prices_found": len(r.price_validation.found_prices) if r.processing_status else 0,
+                "inconsistencies": len(r.price_validation.inconsistencies) if r.processing_status else 0,
+                "confidence": r.price_validation.confidence_score if r.processing_status else 0,
+                "error": r.error_message if r.error_message else None
+            } for r in results
         ]
     }
-
-    try:
-        response = requests.post(gpt41_url, headers=headers, json=data)
-        response.raise_for_status()
-        print("Successfully processed image to Markdown table.")
-        return response.json()  # Return the full JSON response
-    except requests.exceptions.RequestException as e:
-        print(f"Failed to process image. Error: {e}")
-        if response is not None:
-            print("Response Content:", response.text)
-
-        # Fallback to OCR
-        print("Falling back to OCR for text extraction.")
-        try:
-            from pytesseract import image_to_string
-            from PIL import Image
-
-            ocr_text = image_to_string(Image.open(image_path))
-            print("OCR extracted text:", ocr_text)
-            return {"choices": [{"message": {"content": ocr_text}}]}  # Simulate GPT response
-        except Exception as ocr_error:
-            print(f"OCR failed: {ocr_error}")
-        return None
-
-def send_image_to_gpt41_with_original_xml(image_path, gpt41_url, gpt41_key, original_xml):
-    # Encode the image in Base64
-    with open(image_path, "rb") as image_file:
-        base64_image = base64.b64encode(image_file.read()).decode("utf-8")
-
-    headers = {
-        'api-key': gpt41_key,
-        'Content-Type': 'application/json'
-    }
-    data = {
-        "messages": [
-            {
-                "role": "user",
-                "content": (
-                    "Please extract all relevant text and metadata from this image and structure it into a detailed Markdown table. "
-                    "Ensure the table includes all fields, labels, and their associated values as they appear in the form. "
-                    "Focus on accurately capturing the structure and content of the form titled 'Honorarvereinbarung Eventrekorder'. "
-                    "Use the following XML as a reference for the expected structure and content: \n" + original_xml + "\n"
-                    "Avoid placeholder or fabricated data and ensure all extracted content matches the original form. "
-                    "If a field is empty in the form, represent it as an empty tag in the XML."
-                )
-            },
-            {
-                "role": "user",
-                "content": f"data:image/jpeg;base64,{base64_image}"
-            }
-        ]
-    }
-
-    try:
-        response = requests.post(gpt41_url, headers=headers, json=data)
-        response.raise_for_status()
-        print("Successfully processed image to Markdown table using original XML as reference.")
-        return response.json()  # Return the full JSON response
-    except requests.exceptions.RequestException as e:
-        print(f"Failed to process image. Error: {e}")
-        if response is not None:
-            print("Response Content:", response.text)
-        return None
-
-#comment extra
-def send_image_to_gpt41_with_debug(image_path, gpt41_url, gpt41_key, original_xml):
-    # Encode the image in Base64
-    with open(image_path, "rb") as image_file:
-        base64_image = base64.b64encode(image_file.read()).decode("utf-8")
-
-    headers = {
-        'api-key': gpt41_key,
-        'Content-Type': 'application/json'
-    }
-    data = {
-        "messages": [
-            {
-                "role": "user",
-                "content": (
-                    "Please extract all relevant text and metadata from this image and structure it into a detailed Markdown table. "
-                    "Ensure the table includes all fields, labels, and their associated values as they appear in the form. "
-                    "Focus on accurately capturing the structure and content of the form titled 'Honorarvereinbarung Eventrekorder'. "
-                    "Use the following XML as a reference for the expected structure and content: \n" + original_xml + "\n"
-                    "Avoid placeholder or fabricated data and ensure all extracted content matches the original form. "
-                    "If a field is empty in the form, represent it as an empty tag in the XML."
-                )
-            },
-            {
-                "role": "user",
-                "content": f"data:image/jpeg;base64,{base64_image}"
-            }
-        ]
-    }
-
-    try:
-        response = requests.post(gpt41_url, headers=headers, json=data)
-        response.raise_for_status()
-        print("Successfully processed image to Markdown table using original XML as reference.")
-        markdown_content = response.json().get('choices', [{}])[0].get('message', {}).get('content', '')
-        debug_extracted_data(markdown_content)  # Debugging step
-        return markdown_content
-    except requests.exceptions.RequestException as e:
-        print(f"Failed to process image. Error: {e}")
-        if response is not None:
-            print("Response Content:", response.text)
-        return None
-
-def send_markdown_to_gpt4o(markdown_content, gpt4o_url, gpt4o_key):
-    headers = {
-        'api-key': gpt4o_key,
-        'Content-Type': 'application/json'
-    }
-    data = {
-        "messages": [
-            {
-                "role": "system",
-                "content": (
-                    "You are an AI that converts Markdown tables into structured XML matching a predefined schema. "
-                    "The schema should match the structure and content of the original 'Honorarvereinbarung Eventrekorder' form, "
-                    "including metadata, labels, and their associated values. Ensure the XML output replicates the original form's "
-                    "layout and hierarchy accurately. Validate the XML to ensure it is well-formed and matches the original structure. "
-                    "If a field is empty in the form, represent it as an empty tag in the XML."
-                )
-            },
-            {
-                "role": "user",
-                "content": f"Please convert the following Markdown table into XML with the expected structure and content:\n{markdown_content}"
-            }
-        ]
-    }
-
-    try:
-        response = requests.post(gpt4o_url, headers=headers, json=data)
-        response.raise_for_status()
-        print("Successfully converted Markdown to XML.")
-        return response.json()  # Return the full JSON response
-    except requests.exceptions.RequestException as e:
-        print(f"Failed to convert Markdown to XML. Error: {e}")
-        if response is not None:
-            print("Response Content:", response.text)
-        return None
-
-def validate_and_save_xml(xml_content, output_path):
-    try:
-        # Print the XML content for debugging
-        print("Generated XML Content:")
-        print(xml_content)
-
-        # Remove BOM if present
-        if xml_content.startswith('\ufeff'):
-            xml_content = xml_content[1:]
-
-        # Validate XML structure
-        import xml.etree.ElementTree as ET
-        ET.fromstring(xml_content)
-        print("XML is well-formed.")
-
-        # Ensure the output folder exists
-        output_folder = os.path.dirname(output_path)
-        if not os.path.exists(output_folder):
-            os.makedirs(output_folder)
-
-        # Save XML to file
-        with open(output_path, 'w', encoding='utf-8') as xml_file:
-            xml_file.write(xml_content)
-            print(f"Saved XML: {output_path}")
-    except ET.ParseError as e:
-        print(f"XML validation failed: {e}")
-        # Save the XML for debugging even if validation fails
-        output_folder = os.path.dirname(output_path)
-        if not os.path.exists(output_folder):
-            os.makedirs(output_folder)
-        with open(output_path, 'w', encoding='utf-8') as xml_file:
-            xml_file.write(xml_content)
-            print(f"Saved invalid XML for debugging: {output_path}")
-        return False
-    except Exception as e:
-        print(f"Unexpected error during XML validation or saving: {e}")
-        return False
-    return True
-
-def debug_extracted_data(markdown_content):
-    print("Extracted Markdown Content:")
-    print(markdown_content)
+    
+    summary_path = os.path.join(output_folder, "PROCESSING_SUMMARY.json")
+    with open(summary_path, 'w', encoding='utf-8') as f:
+        json.dump(summary, f, indent=2, ensure_ascii=False)
+    
+    # Print to console
+    print("\\n" + "="*60)
+    print("📊 PRICE VALIDATION SUMMARY")
+    print("="*60)
+    print(f"Documents Processed: {summary['processing_summary']['total_documents']}")
+    print(f"Successful: {summary['processing_summary']['successful_documents']}")
+    print(f"Failed: {summary['processing_summary']['failed_documents']}")
+    print(f"Total Prices Found: {summary['processing_summary']['total_prices_found']}")
+    print(f"Inconsistencies Found: {summary['processing_summary']['total_inconsistencies']}")
+    print(f"Average Confidence: {summary['processing_summary']['average_confidence']:.2f}")
+    print("="*60)
+    
+    # Show detailed inconsistencies for non-technical audience
+    if successful_results and any(len(r.price_validation.inconsistencies) > 0 for r in successful_results):
+        print("\\n🚨 PRICING ISSUES FOUND:")
+        print("-" * 60)
+        
+        for result in successful_results:
+            if result.price_validation.inconsistencies:
+                print(f"\\n📄 Document: {result.document_name}")
+                for i, inconsistency in enumerate(result.price_validation.inconsistencies, 1):
+                    print(f"   ⚠️  Issue {i}: {inconsistency}")
+                print(f"   💡 Confidence: {result.price_validation.confidence_score:.0%}")
+                
+        print("\\n" + "-" * 60)
+        print("💰 BUSINESS IMPACT:")
+        print("• These inconsistencies could lead to payment disputes")
+        print("• Manual contract review recommended for flagged documents") 
+        print("• Early detection prevents costly legal issues")
+        print("-" * 60)
+    else:
+        print("\\n✅ NO PRICING ISSUES FOUND")
+        print("All documents have consistent pricing information!")
+        
+    print("\\n📁 Detailed reports saved in: validation_reports/")
+    print("="*60)
+    
+    logger.info(f"Summary report saved: {summary_path}")
 
 def main():
-    pdf_folder = "examplePdf"
-    image_output_folder = "converted_images"
-    gpt41_url = "https://AIAgent-openai02.openai.azure.com/openai/deployments/gpt-4.1-2/chat/completions?api-version=2025-01-01-preview"
-    gpt41_key = os.getenv("GPT41_KEY")
-    gpt4o_url = os.getenv("GPT4O_URL", "https://AIAgent-openai02.openai.azure.com/openai/deployments/gpt-4o/chat/completions?api-version=2025-01-01-preview")
-    gpt4o_key = os.getenv("GPT4O_KEY")
-
-    if not gpt41_key or not gpt4o_key:
-        print("Error: API keys for GPT-4.1 or GPT-4o are not set in environment variables.")
-        exit(1)
-
-    # Step 1: Convert PDFs to images
-    convert_pdf_to_images(pdf_folder, image_output_folder)
-
-    # Step 2: Process images with GPT-4.1 for Markdown table generation
-    for image_file in os.listdir(image_output_folder):
-        if image_file.endswith('.jpeg'):
-            image_path = os.path.join(image_output_folder, image_file)
-            markdown_response = send_image_to_gpt41(image_path, gpt41_url, gpt41_key)
-
-            if markdown_response:
-                markdown_content = markdown_response.get('choices', [{}])[0].get('message', {}).get('content', '')
-
-                # Step 3: Convert Markdown table to XML with GPT-4o
-                xml_response = send_markdown_to_gpt4o(markdown_content, gpt4o_url, gpt4o_key)
-
-                if xml_response:
-                    xml_content = xml_response.get('choices', [{}])[0].get('message', {}).get('content', '')
-                    xml_filename = f"{os.path.splitext(image_file)[0]}.xml"
-                    xml_path = os.path.join("xml_output", xml_filename)
-
-                    # Step 4: Validate and save XML
-                    validate_and_save_xml(xml_content, xml_path)
+    # Configuration from environment variables
+    azure_openai_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
+    document_intelligence_endpoint = os.getenv("DOCUMENT_INTELLIGENCE_ENDPOINT")
+    blob_account_url = os.getenv("BLOB_STORAGE_ACCOUNT_URL")
+    blob_container_name = os.getenv("BLOB_CONTAINER_NAME", "price-validation-docs")
+    
+    # Validate required environment variables
+    required_vars = {
+        "AZURE_OPENAI_ENDPOINT": azure_openai_endpoint,
+        "DOCUMENT_INTELLIGENCE_ENDPOINT": document_intelligence_endpoint,
+        "BLOB_STORAGE_ACCOUNT_URL": blob_account_url
+    }
+    
+    missing_vars = [var for var, value in required_vars.items() if not value]
+    if missing_vars:
+        logger.error(f"Missing required environment variables: {', '.join(missing_vars)}")
+        logger.error("Please set these variables before running the script.")
+        return
+    
+    try:
+        # Initialize Azure clients
+        credential = DefaultAzureCredential()
+        
+        # Azure OpenAI client for GPT-4.1 using Azure AD authentication
+        # Get token for Cognitive Services scope
+        def get_azure_openai_token():
+            token = credential.get_token("https://cognitiveservices.azure.com/.default")
+            return token.token
+        
+        openai_client = AzureOpenAI(
+            azure_endpoint=azure_openai_endpoint,
+            azure_ad_token_provider=get_azure_openai_token,  # Use token provider
+            api_version="2025-01-01-preview"
+        )
+        
+        # Blob Storage client
+        blob_service_client = BlobServiceClient(
+            account_url=blob_account_url,
+            credential=credential
+        )
+        
+        # Document Intelligence client
+        doc_intel_client = DocumentIntelligenceClient(
+            endpoint=document_intelligence_endpoint,
+            credential=credential
+        )
+        
+        logger.info("✅ All Azure clients initialized successfully")
+        
+        # Get list of PDF files from blob storage
+        pdf_files = get_blob_files(blob_service_client, blob_container_name)
+        
+        if not pdf_files:
+            logger.warning("No PDF files found in blob storage")
+            return
+        
+        logger.info(f"Found {len(pdf_files)} PDF files to process")
+        
+        # Process each PDF
+        results = []
+        for pdf_file in pdf_files:
+            try:
+                logger.info(f"Processing: {pdf_file}")
+                
+                # Extract text using Document Intelligence
+                text_content = extract_text_from_pdf(
+                    doc_intel_client, 
+                    blob_service_client, 
+                    blob_container_name, 
+                    pdf_file
+                )
+                
+                if text_content:
+                    # Validate prices using GPT-4.1
+                    validation_result = validate_prices_with_gpt41(
+                        text_content, 
+                        openai_client
+                    )
+                    
+                    # Create processing result
+                    doc_result = DocumentProcessingResult(
+                        document_name=os.path.splitext(pdf_file)[0],
+                        text_content=text_content,
+                        price_validation=validation_result,
+                        processing_status=True
+                    )
+                    
+                    logger.info(f"✅ Successfully processed {pdf_file}")
+                    logger.info(f"   Found {len(validation_result.found_prices)} prices")
+                    logger.info(f"   Found {len(validation_result.inconsistencies)} inconsistencies")
+                    logger.info(f"   Confidence: {validation_result.confidence_score:.2f}")
+                
+                else:
+                    # Failed to extract text
+                    doc_result = DocumentProcessingResult(
+                        document_name=os.path.splitext(pdf_file)[0],
+                        text_content="",
+                        price_validation=PriceValidationResult([], ["Failed to extract text"], 0.0, "Text extraction failed"),
+                        processing_status=False,
+                        error_message="Failed to extract text from PDF"
+                    )
+                    
+                    logger.error(f"❌ Failed to extract text from {pdf_file}")
+                
+                results.append(doc_result)
+                
+            except Exception as e:
+                logger.error(f"Failed to process {pdf_file}: {str(e)}")
+                
+                # Create failed result
+                doc_result = DocumentProcessingResult(
+                    document_name=os.path.splitext(pdf_file)[0],
+                    text_content="",
+                    price_validation=PriceValidationResult([], [f"Processing failed: {str(e)}"], 0.0, f"Error: {str(e)}"),
+                    processing_status=False,
+                    error_message=str(e)
+                )
+                results.append(doc_result)
+        
+        # Save results and create summary
+        save_processing_results(results, "validation_reports")
+        create_summary_report(results, "validation_reports")
+        
+        logger.info("✅ Price validation processing completed!")
+        
+    except Exception as e:
+        logger.error(f"Fatal error in main execution: {str(e)}")
+        raise
 
 if __name__ == "__main__":
     main()

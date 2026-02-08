@@ -1,0 +1,42 @@
+{
+  "processing_summary": {
+    "total_documents_processed": 5,
+    "total_price_pairs_found": 0,
+    "total_valid_matches": 0,
+    "total_mismatches": 0,
+    "documents_with_errors": 0,
+    "overall_accuracy": 0
+  },
+  "document_details": [
+    {
+      "document": "complex_contract_01",
+      "status": "✅ PASS",
+      "prices_found": 0,
+      "mismatches": 0
+    },
+    {
+      "document": "currency_conflict_03",
+      "status": "✅ PASS",
+      "prices_found": 0,
+      "mismatches": 0
+    },
+    {
+      "document": "multilingual_contract_04",
+      "status": "✅ PASS",
+      "prices_found": 0,
+      "mismatches": 0
+    },
+    {
+      "document": "narrative_pricing_05",
+      "status": "✅ PASS",
+      "prices_found": 0,
+      "mismatches": 0
+    },
+    {
+      "document": "rounding_invoice_02",
+      "status": "✅ PASS",
+      "prices_found": 0,
+      "mismatches": 0
+    }
+  ]
+}

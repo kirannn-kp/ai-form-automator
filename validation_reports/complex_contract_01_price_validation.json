@@ -1,0 +1,58 @@
+{
+  "document_name": "complex_contract_01",
+  "processing_status": true,
+  "price_validation": {
+    "found_prices": [
+      {
+        "type": "numerical",
+        "value": 48900,
+        "currency": "EUR",
+        "location": "paragraph 1",
+        "original_text": "EUR 48,900"
+      },
+      {
+        "type": "written",
+        "value": 48900,
+        "currency": "EUR",
+        "location": "paragraph 1",
+        "original_text": "Forty-eight thousand nine hundred euros"
+      },
+      {
+        "type": "numerical",
+        "value": 2000,
+        "currency": "EUR",
+        "location": "paragraph 2",
+        "original_text": "EUR 2,000"
+      },
+      {
+        "type": "written",
+        "value": 2000,
+        "currency": "EUR",
+        "location": "paragraph 2",
+        "original_text": "Two thousand euros"
+      },
+      {
+        "type": "numerical",
+        "value": 50900,
+        "currency": "EUR",
+        "location": "paragraph 3",
+        "original_text": "EUR 50,900"
+      },
+      {
+        "type": "written",
+        "value": 50800,
+        "currency": "EUR",
+        "location": "paragraph 3",
+        "original_text": "Fifty thousand eight hundred euros"
+      }
+    ],
+    "inconsistencies": [
+      "Written and numerical price mismatch in paragraph 3: EUR 50,900 vs 'Fifty thousand eight hundred euros'.",
+      "Mathematical inconsistency: EUR 48,900 + EUR 2,000 = EUR 50,900 (numerical), but written total is 'Fifty thousand eight hundred euros' (EUR 50,800)."
+    ],
+    "confidence_score": 0.99,
+    "validation_details": "Found 6 price references, 2 inconsistencies detected: mismatch between written and numerical total in paragraph 3, and mathematical inconsistency in the written total."
+  },
+  "text_length": 384,
+  "error_message": null
+}

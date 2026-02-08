@@ -1,0 +1,58 @@
+{
+  "document_name": "rounding_invoice_02",
+  "processing_status": true,
+  "price_validation": {
+    "found_prices": [
+      {
+        "type": "numerical",
+        "value": 9450.0,
+        "currency": "USD",
+        "location": "Subtotal",
+        "original_text": "$9,450"
+      },
+      {
+        "type": "written",
+        "value": 9450.0,
+        "currency": "USD",
+        "location": "Subtotal",
+        "original_text": "Nine thousand four hundred fifty dollars"
+      },
+      {
+        "type": "numerical",
+        "value": 661.5,
+        "currency": "USD",
+        "location": "Sales Tax",
+        "original_text": "$661.50"
+      },
+      {
+        "type": "written",
+        "value": 661.0,
+        "currency": "USD",
+        "location": "Sales Tax",
+        "original_text": "Six hundred sixty-one dollars"
+      },
+      {
+        "type": "numerical",
+        "value": 10111.5,
+        "currency": "USD",
+        "location": "Total Amount Due",
+        "original_text": "$10,111.50"
+      },
+      {
+        "type": "written",
+        "value": 10112.0,
+        "currency": "USD",
+        "location": "Total Amount Due",
+        "original_text": "Ten thousand one hundred twelve dollars"
+      }
+    ],
+    "inconsistencies": [
+      "Written price for Sales Tax ('Six hundred sixty-one dollars') does not match numerical value ($661.50) in Sales Tax section",
+      "Written price for Total Amount Due ('Ten thousand one hundred twelve dollars') does not match numerical value ($10,111.50) in Total Amount Due section"
+    ],
+    "confidence_score": 0.98,
+    "validation_details": "Found 6 price references, 2 inconsistencies detected between numerical and written price representations. All prices are in USD; no currency inconsistencies detected. Mathematical calculation ($9,450 + $661.50 = $10,111.50) is correct for numerical values."
+  },
+  "text_length": 283,
+  "error_message": null
+}

@@ -1,0 +1,58 @@
+{
+  "document_name": "narrative_pricing_05",
+  "processing_status": true,
+  "price_validation": {
+    "found_prices": [
+      {
+        "type": "numerical",
+        "value": 6500.0,
+        "currency": "EUR",
+        "location": "paragraph 1",
+        "original_text": "EUR 6,500"
+      },
+      {
+        "type": "written",
+        "value": 6500.0,
+        "currency": "EUR",
+        "location": "paragraph 1",
+        "original_text": "Six thousand five hundred euros"
+      },
+      {
+        "type": "numerical",
+        "value": 3250.0,
+        "currency": "EUR",
+        "location": "paragraph 2",
+        "original_text": "EUR 3,250"
+      },
+      {
+        "type": "written",
+        "value": 3200.0,
+        "currency": "EUR",
+        "location": "paragraph 2",
+        "original_text": "Three thousand two hundred euros"
+      },
+      {
+        "type": "numerical",
+        "value": 9750.0,
+        "currency": "EUR",
+        "location": "paragraph 3",
+        "original_text": "EUR 9,750"
+      },
+      {
+        "type": "written",
+        "value": 9750.0,
+        "currency": "EUR",
+        "location": "paragraph 3",
+        "original_text": "Nine thousand seven hundred fifty euros"
+      }
+    ],
+    "inconsistencies": [
+      "Price mismatch: EUR 3,250 vs 'Three thousand two hundred euros' in paragraph 2",
+      "Mathematical inconsistency: EUR 6,500 + EUR 3,250 = EUR 9,750 stated, but written total is consistent only if bonus is EUR 3,250 (not 3,200 as written)"
+    ],
+    "confidence_score": 0.98,
+    "validation_details": "Found 6 price references, 2 inconsistencies detected: one mismatch between numerical and written price for the performance bonus, and a related calculation inconsistency."
+  },
+  "text_length": 380,
+  "error_message": null
+}

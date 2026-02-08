@@ -1,0 +1,11 @@
+{
+  "document_name": "rounding_invoice_02",
+  "summary": {
+    "total_prices_found": 0,
+    "valid_matches": 0,
+    "mismatches_count": 0,
+    "overall_status": true
+  },
+  "mismatches": [],
+  "all_validations": []
+}

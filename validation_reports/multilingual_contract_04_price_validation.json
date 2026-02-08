@@ -1,0 +1,58 @@
+{
+  "document_name": "multilingual_contract_04",
+  "processing_status": true,
+  "price_validation": {
+    "found_prices": [
+      {
+        "type": "numerical",
+        "value": 7800.0,
+        "currency": "EUR",
+        "location": "line 2",
+        "original_text": "EUR 7.800"
+      },
+      {
+        "type": "written",
+        "value": 7800.0,
+        "currency": "EUR",
+        "location": "line 2",
+        "original_text": "Seven thousand eight hundred euros"
+      },
+      {
+        "type": "numerical",
+        "value": 1200.0,
+        "currency": "EUR",
+        "location": "line 3",
+        "original_text": "EUR 1.200"
+      },
+      {
+        "type": "written",
+        "value": 1200.0,
+        "currency": "EUR",
+        "location": "line 3",
+        "original_text": "Eintausendzweihundert Euro"
+      },
+      {
+        "type": "numerical",
+        "value": 9000.0,
+        "currency": "EUR",
+        "location": "line 4",
+        "original_text": "EUR 9.000"
+      },
+      {
+        "type": "written",
+        "value": 9100.0,
+        "currency": "EUR",
+        "location": "line 4",
+        "original_text": "Nine thousand one hundred euros"
+      }
+    ],
+    "inconsistencies": [
+      "Discrepancy between numerical and written total: 'EUR 9.000' vs 'Nine thousand one hundred euros' in line 4. Numerical value is 9,000 EUR, written value is 9,100 EUR.",
+      "Mathematical inconsistency: Gesamtpreis (7,800 EUR) + Zusätzliche Wartungsgebühr (1,200 EUR) = 9,000 EUR, but written Gesamtbetrag is 'Nine thousand one hundred euros' (9,100 EUR)."
+    ],
+    "confidence_score": 0.98,
+    "validation_details": "Found 6 price references. Detected 2 inconsistencies: mismatch between numerical and written total, and mathematical inconsistency in total calculation. All prices use EUR, no currency inconsistencies."
+  },
+  "text_length": 270,
+  "error_message": null
+}
